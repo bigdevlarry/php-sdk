@@ -27,11 +27,11 @@ use Psr\Log\NullLogger;
  *
  * @author Larry Sule-balogun <suleabimbola@gmail.com>
  */
-final readonly class ResourceSubscribeHandler implements RequestHandlerInterface
+final  class ResourceSubscribeHandler implements RequestHandlerInterface
 {
     public function __construct(
-        private RegistryInterface $registry,
-        private LoggerInterface $logger = new NullLogger(),
+        private readonly RegistryInterface $registry,
+        private readonly LoggerInterface $logger = new NullLogger(),
     ) {
     }
 

@@ -25,6 +25,7 @@ use Mcp\Schema\Prompt;
 use Mcp\Schema\Resource;
 use Mcp\Schema\ResourceTemplate;
 use Mcp\Schema\Tool;
+use Mcp\Server\Protocol;
 use Mcp\Server\Session\SessionInterface;
 
 
@@ -172,7 +173,7 @@ interface RegistryInterface
 
     /**
      * Notifies all sessions subscribed to the given resource URI that the
-     * resource has changed. Dispatches a ResourceUpdatedNotification for each subscriber.
+     * resource has changed. Sends a ResourceUpdatedNotification for each subscriber.
      */
-    public function notifyResourceChanged(string $uri): void;
+    public function notifyResourceChanged(Protocol $protocol, string $uri): void;
 }

@@ -31,6 +31,7 @@ use Mcp\Schema\Prompt;
 use Mcp\Schema\Resource;
 use Mcp\Schema\ResourceTemplate;
 use Mcp\Schema\Tool;
+use Mcp\Server\Protocol;
 use Mcp\Server\Session\SessionInterface;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
@@ -482,14 +483,14 @@ final class Registry implements RegistryInterface
         }
     }
 
-    public function notifyResourceChanged(string $uri): void
+    public function notifyResourceChanged(Protocol $protocol, string $uri): void
     {
         if (!isset($this->resourceSubscriptions[$uri])) {
             return;
         }
 
-        foreach ($this->resourceSubscriptions[$uri] as $_subscriber) {
-            $this->eventDispatcher->dispatch(new ResourceUpdatedNotification($uri));
+        foreach ($this->resourceSubscriptions[$uri] as $session) {
+            $protocol->sendNotification(new ResourceUpdatedNotification($uri), $session);
         }
     }
 }
