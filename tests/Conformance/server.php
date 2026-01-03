@@ -40,7 +40,6 @@ $server = Server::builder()
     ->setServerInfo('mcp-conformance-test-server', '1.0.0')
     ->setSession(new FileSessionStore(__DIR__.'/sessions'))
     ->setLogger($logger)
-    ->setRegistry($registry)
     // Tools
     ->addTool(fn () => 'This is a simple text response for testing.', 'test_simple_text', 'Tests simple text content response')
     ->addTool(fn () => new ImageContent(Elements::TEST_IMAGE_BASE64, 'image/png'), 'test_image_content', 'Tests image content response')
