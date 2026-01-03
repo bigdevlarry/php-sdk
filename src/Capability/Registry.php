@@ -25,11 +25,13 @@ use Mcp\Exception\InvalidCursorException;
 use Mcp\Exception\PromptNotFoundException;
 use Mcp\Exception\ResourceNotFoundException;
 use Mcp\Exception\ToolNotFoundException;
+use Mcp\Schema\Notification\ResourceUpdatedNotification;
 use Mcp\Schema\Page;
 use Mcp\Schema\Prompt;
 use Mcp\Schema\Resource;
 use Mcp\Schema\ResourceTemplate;
 use Mcp\Schema\Tool;
+use Mcp\Server\Session\SessionInterface;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -60,6 +62,11 @@ final class Registry implements RegistryInterface
      * @var array<string, ResourceTemplateReference>
      */
     private array $resourceTemplates = [];
+
+    /**
+     * @var array<string, array<string, SessionInterface>>
+     */
+    private array $resourceSubscriptions = [];
 
     public function __construct(
         private readonly ?EventDispatcherInterface $eventDispatcher = null,
@@ -448,5 +455,41 @@ final class Registry implements RegistryInterface
         }
 
         return array_values(\array_slice($items, $offset, $limit));
+    }
+
+    public function subscribe(SessionInterface $session, string $uri): void
+    {
+        if (!isset($this->resourceSubscriptions[$uri])) {
+            $this->resourceSubscriptions[$uri] = [];
+        }
+
+        $sessionId = $session->getId()->toRfc4122();
+        $this->resourceSubscriptions[$uri][$sessionId] = $session;
+    }
+
+    public function unsubscribe(SessionInterface $session, string $uri): void
+    {
+        if (!isset($this->resourceSubscriptions[$uri])) {
+            return;
+        }
+
+        $sessionId = $session->getId()->toRfc4122();
+
+        unset($this->resourceSubscriptions[$uri][$sessionId]);
+
+        if ([] === $this->resourceSubscriptions[$uri]) {
+            unset($this->resourceSubscriptions[$uri]);
+        }
+    }
+
+    public function notifyResourceChanged(string $uri): void
+    {
+        if (!isset($this->resourceSubscriptions[$uri])) {
+            return;
+        }
+
+        foreach ($this->resourceSubscriptions[$uri] as $_subscriber) {
+            $this->eventDispatcher->dispatch(new ResourceUpdatedNotification($uri));
+        }
     }
 }

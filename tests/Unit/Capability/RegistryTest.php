@@ -20,13 +20,17 @@ use Mcp\Capability\Registry\ToolReference;
 use Mcp\Exception\PromptNotFoundException;
 use Mcp\Exception\ResourceNotFoundException;
 use Mcp\Exception\ToolNotFoundException;
+use Mcp\Schema\Notification\ResourceUpdatedNotification;
 use Mcp\Schema\Prompt;
 use Mcp\Schema\Resource;
 use Mcp\Schema\ResourceTemplate;
 use Mcp\Schema\Tool;
+use Mcp\Server\Session\SessionInterface;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Uid\Uuid;
 
 class RegistryTest extends TestCase
 {
@@ -525,6 +529,98 @@ class RegistryTest extends TestCase
         // Second registration should override the first
         $toolRef = $this->registry->getTool('test_tool');
         $this->assertEquals('second', ($toolRef->handler)());
+    }
+
+    public function testSubscribeAndDispatchesNotification(): void
+    {
+        $eventDispatcher = $this->createMock(EventDispatcherInterface::class);
+        $this->registry = new Registry($eventDispatcher, $this->logger);
+
+        $session1 = $this->createMock(SessionInterface::class);
+        $session2 = $this->createMock(SessionInterface::class);
+
+        $uuid1 = Uuid::v4();
+        $uuid2 = Uuid::v4();
+
+        $session1->method('getId')->willReturn($uuid1);
+        $session2->method('getId')->willReturn($uuid2);
+
+        $uri = 'test://resource1';
+
+        // Expect dispatch to be called for each subscriber
+        $eventDispatcher->expects($this->exactly(2))
+            ->method('dispatch')
+            ->with($this->callback(function ($notification) use ($uri) {
+                return $notification instanceof ResourceUpdatedNotification
+                    && $notification->uri === $uri;
+            }));
+
+        // Subscribe both sessions
+        $this->registry->subscribe($session1, $uri);
+        $this->registry->subscribe($session2, $uri);
+
+        $this->registry->notifyResourceChanged($uri);
+    }
+
+    public function testUnsubscribeRemovesOnlyTargetSession(): void
+    {
+        $eventDispatcher = $this->createMock(EventDispatcherInterface::class);
+        $this->registry = new Registry($eventDispatcher, $this->logger);
+
+        $session1 = $this->createMock(SessionInterface::class);
+        $session2 = $this->createMock(SessionInterface::class);
+
+        $uuid1 = Uuid::v4();
+        $uuid2 = Uuid::v4();
+
+        $session1->method('getId')->willReturn($uuid1);
+        $session2->method('getId')->willReturn($uuid2);
+
+        $uri = 'test://resource';
+
+        // Subscribe both sessions
+        $this->registry->subscribe($session1, $uri);
+        $this->registry->subscribe($session2, $uri);
+
+        $eventDispatcher->expects($this->exactly(2))
+            ->method('dispatch')
+            ->with($this->callback(fn ($notification) => $notification instanceof ResourceUpdatedNotification && $notification->uri === $uri
+            ));
+
+        $this->registry->notifyResourceChanged($uri);
+
+        // Unsubscribe only session1
+        $this->registry->unsubscribe($session1, $uri);
+
+        // Dispatch is called for only session2
+        $eventDispatcher->expects($this->once())
+            ->method('dispatch')
+            ->with($this->callback(fn ($notification) => $notification instanceof ResourceUpdatedNotification && $notification->uri === $uri
+            ));
+
+        $this->registry->notifyResourceChanged($uri);
+    }
+
+    public function testDuplicateSubscribeDoesNotTriggerDuplicateNotifications(): void
+    {
+        $eventDispatcher = $this->createMock(EventDispatcherInterface::class);
+        $this->registry = new Registry($eventDispatcher, $this->logger);
+
+        $session = $this->createMock(SessionInterface::class);
+        $uuid = Uuid::v4();
+        $session->method('getId')->willReturn($uuid);
+
+        $uri = 'test://resource';
+        $this->registry->subscribe($session, $uri);
+        $this->registry->subscribe($session, $uri);
+
+
+        $eventDispatcher->expects($this->once())
+            ->method('dispatch')
+            ->with($this->callback(fn ($notification) => $notification instanceof ResourceUpdatedNotification && $notification->uri === $uri
+            ));
+
+        $this->registry->notifyResourceChanged($uri);
     }
 
     private function createValidTool(string $name): Tool

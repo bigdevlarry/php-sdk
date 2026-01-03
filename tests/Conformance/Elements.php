@@ -128,4 +128,14 @@ final class Elements
             new PromptMessage(Role::User, new TextContent('Please analyze the image above.')),
         ];
     }
+
+    public function resourceSubscribe(): object
+    {
+        return (object) [];
+    }
+
+    public function resourceUnsubscribe(): object
+    {
+        return (object) [];
+    }
 }
