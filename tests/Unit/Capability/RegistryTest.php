@@ -20,23 +20,35 @@ use Mcp\Capability\Registry\ToolReference;
 use Mcp\Exception\PromptNotFoundException;
 use Mcp\Exception\ResourceNotFoundException;
 use Mcp\Exception\ToolNotFoundException;
+use Mcp\Schema\Notification\ResourceUpdatedNotification;
 use Mcp\Schema\Prompt;
 use Mcp\Schema\Resource;
 use Mcp\Schema\ResourceTemplate;
 use Mcp\Schema\Tool;
+use Mcp\Server\Protocol;
+use Mcp\Server\Session\SessionFactoryInterface;
+use Mcp\Server\Session\SessionInterface;
+use Mcp\Server\Session\SessionStoreInterface;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Uid\Uuid;
 
 class RegistryTest extends TestCase
 {
     private Registry $registry;
+    private Protocol|MockObject $protocol;
     private LoggerInterface|MockObject $logger;
+    private SessionStoreInterface|MockObject $sessionStore;
+    private SessionFactoryInterface|MockObject $sessionFactory;
 
     protected function setUp(): void
     {
         $this->logger = $this->createMock(LoggerInterface::class);
-        $this->registry = new Registry(null, $this->logger);
+        $this->sessionStore = $this->createMock(SessionStoreInterface::class);
+        $this->sessionFactory = $this->createMock(SessionFactoryInterface::class);
+        $this->registry = new Registry(null, $this->logger, $this->sessionStore, $this->sessionFactory);
+        $this->protocol = $this->createMock(Protocol::class);
     }
 
     public function testHasserReturnFalseForEmptyRegistry(): void
@@ -525,6 +537,222 @@ class RegistryTest extends TestCase
         // Second registration should override the first
         $toolRef = $this->registry->getTool('test_tool');
         $this->assertEquals('second', ($toolRef->handler)());
+    }
+
+    public function testSubscribeAndSendsNotification(): void
+    {
+        $session1 = $this->createMock(SessionInterface::class);
+        $session2 = $this->createMock(SessionInterface::class);
+
+        $uuid1 = Uuid::v4();
+        $uuid2 = Uuid::v4();
+
+        $session1->method('getId')->willReturn($uuid1);
+        $session2->method('getId')->willReturn($uuid2);
+
+        $uri = 'test://resource1';
+
+        $session1->expects($this->once())->method('get')->with('resource_subscriptions', [])->willReturn([]);
+        $session1->expects($this->once())->method('set')->with('resource_subscriptions', [$uri => true]);
+        $session1->expects($this->once())->method('save');
+
+        $session2->expects($this->once())->method('get')->with('resource_subscriptions', [])->willReturn([]);
+        $session2->expects($this->once())->method('set')->with('resource_subscriptions', [$uri => true]);
+        $session2->expects($this->once())->method('save');
+
+        // Subscribe both sessions
+        $this->registry->subscribe($session1, $uri);
+        $this->registry->subscribe($session2, $uri);
+
+        // Mock session store to return both session IDs
+        $this->sessionStore->expects($this->once())
+            ->method('getAllSessionIds')
+            ->willReturn([$uuid1, $uuid2]);
+
+        // Mock session store reads
+        $sessionData1 = json_encode(['resource_subscriptions' => [$uri => true]]);
+        $sessionData2 = json_encode(['resource_subscriptions' => [$uri => true]]);
+
+        $this->sessionStore->expects($this->exactly(2))
+            ->method('read')
+            ->willReturnCallback(function ($id) use ($uuid1, $uuid2, $sessionData1, $sessionData2) {
+                if ($id === $uuid1) {
+                    return $sessionData1;
+                }
+                if ($id === $uuid2) {
+                    return $sessionData2;
+                }
+
+                return false;
+            });
+
+        $this->sessionFactory->expects($this->exactly(2))
+            ->method('createWithId')
+            ->willReturnCallback(function ($id) use ($uuid1, $uuid2, $session1, $session2) {
+                if ($id === $uuid1) {
+                    return $session1;
+                }
+                if ($id === $uuid2) {
+                    return $session2;
+                }
+
+                return null;
+            });
+
+        $this->protocol->expects($this->exactly(2))
+            ->method('sendNotification')
+            ->with($this->callback(function ($notification) use ($uri) {
+                return $notification instanceof ResourceUpdatedNotification
+                    && $notification->uri === $uri;
+            }));
+
+        $this->registry->notifyResourceChanged($this->protocol, $uri);
+    }
+
+    public function testUnsubscribeRemovesOnlyTargetSession(): void
+    {
+        $session1 = $this->createMock(SessionInterface::class);
+        $uuid1 = Uuid::v4();
+        $session1->method('getId')->willReturn($uuid1);
+
+        $uri = 'test://resource';
+
+        $callCount = 0;
+        $session1->expects($this->exactly(2))->method('get')->with('resource_subscriptions', [])
+            ->willReturnCallback(function () use (&$callCount, $uri) {
+                return 0 === $callCount++ ? [] : [$uri => true];
+            });
+        $session1->expects($this->exactly(2))->method('set')
+            ->willReturnCallback(function ($key, $value) use ($uri) {
+                // First call sets subscription, second call removes it
+                static $callNum = 0;
+                if (0 === $callNum++) {
+                    $this->assertEquals('resource_subscriptions', $key);
+                    $this->assertEquals([$uri => true], $value);
+                } else {
+                    $this->assertEquals('resource_subscriptions', $key);
+                    $this->assertEquals([], $value);
+                }
+            });
+        $session1->expects($this->exactly(2))->method('save');
+
+        // Subscribe session
+        $this->registry->subscribe($session1, $uri);
+
+        // Mock session store to return the session ID
+        $this->sessionStore->expects($this->once())
+            ->method('getAllSessionIds')
+            ->willReturn([$uuid1]);
+
+        $sessionData = json_encode(['resource_subscriptions' => [$uri => true]]);
+        $this->sessionStore->expects($this->once())
+            ->method('read')
+            ->with($uuid1)
+            ->willReturn($sessionData);
+
+        $this->sessionFactory->expects($this->once())
+            ->method('createWithId')
+            ->with($uuid1)
+            ->willReturn($session1);
+
+        $this->protocol->expects($this->exactly(1))
+            ->method('sendNotification')
+            ->with($this->callback(fn ($notification) => $notification instanceof ResourceUpdatedNotification && $notification->uri === $uri
+            ));
+
+        $this->registry->notifyResourceChanged($this->protocol, $uri);
+
+        // Unsubscribe only session1
+        $this->registry->unsubscribe($session1, $uri);
+    }
+
+    public function testUnsubscribeStopsNotifications(): void
+    {
+        $protocol = $this->createMock(Protocol::class);
+        $session = $this->createMock(SessionInterface::class);
+        $uuid = Uuid::v4();
+        $session->method('getId')->willReturn($uuid);
+        $uri = 'test://resource';
+
+        $callCount = 0;
+        $session->expects($this->exactly(2))->method('get')->with('resource_subscriptions', [])
+            ->willReturnCallback(function () use (&$callCount, $uri) {
+                return 0 === $callCount++ ? [] : [$uri => true];
+            });
+        $session->expects($this->exactly(2))->method('set')
+            ->willReturnCallback(function ($key, $value) use ($uri) {
+                static $callNum = 0;
+                $this->assertEquals('resource_subscriptions', $key);
+                if (0 === $callNum++) {
+                    $this->assertEquals([$uri => true], $value);
+                } else {
+                    $this->assertEquals([], $value);
+                }
+            });
+        $session->expects($this->exactly(2))->method('save');
+
+        $this->registry->subscribe($session, $uri);
+        $this->registry->unsubscribe($session, $uri);
+
+        $this->sessionStore->expects($this->once())
+            ->method('getAllSessionIds')
+            ->willReturn([$uuid]);
+
+        // Mock session store read - session has no subscriptions
+        $sessionData = json_encode(['resource_subscriptions' => []]);
+        $this->sessionStore->expects($this->once())
+            ->method('read')
+            ->with($uuid)
+            ->willReturn($sessionData);
+
+        $protocol->expects($this->never())->method('sendNotification');
+
+        $this->registry->notifyResourceChanged($protocol, $uri);
+    }
+
+    public function testDuplicateSubscribeDoesNotTriggerDuplicateNotifications(): void
+    {
+        $session = $this->createMock(SessionInterface::class);
+        $uuid = Uuid::v4();
+        $session->method('getId')->willReturn($uuid);
+
+        $uri = 'test://resource';
+
+        // First subscribe
+        $callCount = 0;
+        $session->expects($this->exactly(2))->method('get')->with('resource_subscriptions', [])
+            ->willReturnCallback(function () use (&$callCount, $uri) {
+                return 0 === $callCount++ ? [] : [$uri => true];
+            });
+        $session->expects($this->exactly(2))->method('set')
+            ->with('resource_subscriptions', [$uri => true]);
+        $session->expects($this->exactly(2))->method('save');
+
+        $this->registry->subscribe($session, $uri);
+        $this->registry->subscribe($session, $uri);
+
+        $this->sessionStore->expects($this->once())
+            ->method('getAllSessionIds')
+            ->willReturn([$uuid]);
+
+        // Mock session store read
+        $sessionData = json_encode(['resource_subscriptions' => [$uri => true]]);
+        $this->sessionStore->expects($this->once())
+            ->method('read')
+            ->with($uuid)
+            ->willReturn($sessionData);
+
+        $this->sessionFactory->expects($this->once())
+            ->method('createWithId')
+            ->with($uuid)
+            ->willReturn($session);
+
+        $this->protocol->expects($this->once())
+            ->method('sendNotification')
+            ->with($this->callback(fn ($notification) => $notification instanceof ResourceUpdatedNotification && $notification->uri === $uri
+            ));
+
+        $this->registry->notifyResourceChanged($this->protocol, $uri);
     }
 
     public function testExtractStructuredContentReturnsNullWhenOutputSchemaIsNull(): void

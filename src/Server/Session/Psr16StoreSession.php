@@ -26,6 +26,8 @@ use Symfony\Component\Uid\Uuid;
  */
 class Psr16StoreSession implements SessionStoreInterface
 {
+    private const SESSION_IDS_KEY = 'mcp-session-ids';
+
     public function __construct(
         private readonly CacheInterface $cache,
         private readonly string $prefix = 'mcp-',
@@ -54,7 +56,13 @@ class Psr16StoreSession implements SessionStoreInterface
     public function write(Uuid $id, string $data): bool
     {
         try {
-            return $this->cache->set($this->getKey($id), $data, $this->ttl);
+            $result = $this->cache->set($this->getKey($id), $data, $this->ttl);
+
+            if ($result) {
+                $this->addSessionId($id);
+            }
+
+            return $result;
         } catch (\Throwable) {
             return false;
         }
@@ -63,7 +71,13 @@ class Psr16StoreSession implements SessionStoreInterface
     public function destroy(Uuid $id): bool
     {
         try {
-            return $this->cache->delete($this->getKey($id));
+            $result = $this->cache->delete($this->getKey($id));
+
+            if ($result) {
+                $this->removeSessionId($id);
+            }
+
+            return $result;
         } catch (\Throwable) {
             return false;
         }
@@ -72,6 +86,82 @@ class Psr16StoreSession implements SessionStoreInterface
     public function gc(): array
     {
         return [];
+    }
+
+    public function getAllSessionIds(): array
+    {
+        try {
+            $sessionIdsData = $this->cache->get(self::SESSION_IDS_KEY, []);
+
+            if (!\is_array($sessionIdsData)) {
+                return [];
+            }
+
+            $validSessionIds = [];
+
+            foreach ($sessionIdsData as $sessionIdString) {
+                try {
+                    $uuid = Uuid::fromString($sessionIdString);
+                    if ($this->exists($uuid)) {
+                        $validSessionIds[] = $uuid;
+                    }
+                } catch (\Throwable) {
+                    // Skip invalid UUIDs
+                }
+            }
+
+            if (\count($validSessionIds) !== \count($sessionIdsData)) {
+                $this->cache->set(
+                    self::SESSION_IDS_KEY,
+                    array_map(fn (Uuid $id) => $id->toRfc4122(), $validSessionIds),
+                    null
+                );
+            }
+
+            return $validSessionIds;
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    private function addSessionId(Uuid $id): void
+    {
+        try {
+            $sessionIds = $this->cache->get(self::SESSION_IDS_KEY, []);
+
+            if (!\is_array($sessionIds)) {
+                $sessionIds = [];
+            }
+
+            $idString = $id->toRfc4122();
+            if (!\in_array($idString, $sessionIds, true)) {
+                $sessionIds[] = $idString;
+                $this->cache->set(self::SESSION_IDS_KEY, $sessionIds, null);
+            }
+        } catch (\Throwable) {
+            return;
+        }
+    }
+
+    private function removeSessionId(Uuid $id): void
+    {
+        try {
+            $sessionIds = $this->cache->get(self::SESSION_IDS_KEY, []);
+
+            if (!\is_array($sessionIds)) {
+                return;
+            }
+
+            $idString = $id->toRfc4122();
+            $sessionIds = array_values(array_filter(
+                $sessionIds,
+                fn ($sid) => $sid !== $idString
+            ));
+
+            $this->cache->set(self::SESSION_IDS_KEY, $sessionIds, null);
+        } catch (\Throwable) {
+            return;
+        }
     }
 
     private function getKey(Uuid $id): string

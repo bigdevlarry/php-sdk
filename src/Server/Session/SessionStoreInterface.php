@@ -61,4 +61,11 @@ interface SessionStoreInterface
      * @return Uuid[]
      */
     public function gc(): array;
+
+    /**
+     * Get all active session IDs.
+     *
+     * @return Uuid[]
+     */
+    public function getAllSessionIds(): array;
 }

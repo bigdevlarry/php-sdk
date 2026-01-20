@@ -150,6 +150,44 @@ class FileSessionStore implements SessionStoreInterface
         return $deleted;
     }
 
+    public function getAllSessionIds(): array
+    {
+        $sessionIds = [];
+        $now = $this->clock->now()->getTimestamp();
+
+        $dir = @opendir($this->directory);
+        if (false === $dir) {
+            return $sessionIds;
+        }
+
+        while (($entry = readdir($dir)) !== false) {
+            // Skip dot entries
+            if ('.' === $entry || '..' === $entry) {
+                continue;
+            }
+
+            $path = $this->directory.\DIRECTORY_SEPARATOR.$entry;
+            if (!is_file($path)) {
+                continue;
+            }
+
+            $mtime = @filemtime($path) ?: 0;
+            if (($now - $mtime) > $this->ttl) {
+                continue;
+            }
+
+            try {
+                $sessionIds[] = Uuid::fromString($entry);
+            } catch (\Throwable) {
+                // ignore non-UUID file names
+            }
+        }
+
+        closedir($dir);
+
+        return $sessionIds;
+    }
+
     private function pathFor(Uuid $id): string
     {
         return $this->directory.\DIRECTORY_SEPARATOR.$id->toRfc4122();

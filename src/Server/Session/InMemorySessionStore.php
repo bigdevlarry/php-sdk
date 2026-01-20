@@ -87,4 +87,14 @@ class InMemorySessionStore implements SessionStoreInterface
 
         return $deletedSessions;
     }
+
+    public function getAllSessionIds(): array
+    {
+        $ids = [];
+        foreach (array_keys($this->store) as $id) {
+            $ids[] = Uuid::fromString($id);
+        }
+
+        return $ids;
+    }
 }

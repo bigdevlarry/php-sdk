@@ -25,14 +25,20 @@ use Mcp\Exception\InvalidCursorException;
 use Mcp\Exception\PromptNotFoundException;
 use Mcp\Exception\ResourceNotFoundException;
 use Mcp\Exception\ToolNotFoundException;
+use Mcp\Schema\Notification\ResourceUpdatedNotification;
 use Mcp\Schema\Page;
 use Mcp\Schema\Prompt;
 use Mcp\Schema\Resource;
 use Mcp\Schema\ResourceTemplate;
 use Mcp\Schema\Tool;
+use Mcp\Server\Protocol;
+use Mcp\Server\Session\SessionFactoryInterface;
+use Mcp\Server\Session\SessionInterface;
+use Mcp\Server\Session\SessionStoreInterface;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Psr\SimpleCache\InvalidArgumentException;
 
 /**
  * Registry implementation that manages MCP element registration and access.
@@ -64,6 +70,8 @@ final class Registry implements RegistryInterface
     public function __construct(
         private readonly ?EventDispatcherInterface $eventDispatcher = null,
         private readonly LoggerInterface $logger = new NullLogger(),
+        private readonly ?SessionStoreInterface $sessionStore = null,
+        private readonly ?SessionFactoryInterface $sessionFactory = null,
         private readonly NameValidator $nameValidator = new NameValidator(),
     ) {
     }
@@ -387,6 +395,64 @@ final class Registry implements RegistryInterface
             }
             if (!empty($state->getPrompts())) {
                 $this->eventDispatcher->dispatch(new PromptListChangedEvent());
+            }
+        }
+    }
+
+    /**
+     * @throws InvalidArgumentException
+     */
+    public function subscribe(SessionInterface $session, string $uri): void
+    {
+        $subscriptions = $session->get('resource_subscriptions', []);
+        $subscriptions[$uri] = true;
+        $session->set('resource_subscriptions', $subscriptions);
+        $session->save();
+    }
+
+    /**
+     * @throws InvalidArgumentException
+     */
+    public function unsubscribe(SessionInterface $session, string $uri): void
+    {
+        $subscriptions = $session->get('resource_subscriptions', []);
+        unset($subscriptions[$uri]);
+        $session->set('resource_subscriptions', $subscriptions);
+        $session->save();
+    }
+
+    public function notifyResourceChanged(Protocol $protocol, string $uri): void
+    {
+        if (!$this->sessionStore || !$this->sessionFactory) {
+            $this->logger->warning('Cannot send resource notifications: session store or factory not configured.');
+
+            return;
+        }
+
+        foreach ($this->sessionStore->getAllSessionIds() as $sessionId) {
+            try {
+                $sessionData = $this->sessionStore->read($sessionId);
+                if (!$sessionData) {
+                    continue;
+                }
+
+                $sessionArray = json_decode($sessionData, true);
+                if (!\is_array($sessionArray)) {
+                    continue;
+                }
+
+                if (!isset($sessionArray['resource_subscriptions'][$uri])) {
+                    continue;
+                }
+
+                $session = $this->sessionFactory->createWithId($sessionId, $this->sessionStore);
+                $protocol->sendNotification(new ResourceUpdatedNotification($uri), $session);
+            } catch (\Throwable $e) {
+                $this->logger->error('Error sending resource notification to session', [
+                    'session_id' => $sessionId->toRfc4122(),
+                    'uri' => $uri,
+                    'exception' => $e,
+                ]);
             }
         }
     }

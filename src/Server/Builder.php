@@ -488,7 +488,17 @@ final class Builder
     {
         $logger = $this->logger ?? new NullLogger();
         $container = $this->container ?? new Container();
-        $registry = $this->registry ?? new Registry($this->eventDispatcher, $logger);
+
+        $sessionTtl = $this->sessionTtl ?? 3600;
+        $sessionFactory = $this->sessionFactory ?? new SessionFactory();
+        $sessionStore = $this->sessionStore ?? new InMemorySessionStore($sessionTtl);
+
+        $registry = $this->registry ?? new Registry(
+            $this->eventDispatcher,
+            $logger,
+            $sessionStore,
+            $sessionFactory
+        );
 
         $loaders = [
             ...$this->loaders,
@@ -504,16 +514,13 @@ final class Builder
             $loader->load($registry);
         }
 
-        $sessionTtl = $this->sessionTtl ?? 3600;
-        $sessionFactory = $this->sessionFactory ?? new SessionFactory();
-        $sessionStore = $this->sessionStore ?? new InMemorySessionStore($sessionTtl);
         $messageFactory = MessageFactory::make();
 
         $capabilities = $this->serverCapabilities ?? new ServerCapabilities(
             tools: $registry->hasTools(),
             toolsListChanged: $this->eventDispatcher instanceof EventDispatcherInterface,
             resources: $registry->hasResources() || $registry->hasResourceTemplates(),
-            resourcesSubscribe: false,
+            resourcesSubscribe: $registry->hasResources() || $registry->hasResourceTemplates(),
             resourcesListChanged: $this->eventDispatcher instanceof EventDispatcherInterface,
             prompts: $registry->hasPrompts(),
             promptsListChanged: $this->eventDispatcher instanceof EventDispatcherInterface,
@@ -536,6 +543,8 @@ final class Builder
             new Handler\Request\ListToolsHandler($registry, $this->paginationLimit),
             new Handler\Request\PingHandler(),
             new Handler\Request\ReadResourceHandler($registry, $referenceHandler, $logger),
+            new Handler\Request\ResourceSubscribeHandler($registry, $logger),
+            new Handler\Request\ResourceUnsubscribeHandler($registry, $logger),
             new Handler\Request\SetLogLevelHandler(),
         ]);
 
