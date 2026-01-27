@@ -14,6 +14,7 @@ declare(strict_types=1);
 namespace Mcp\Server\Session;
 
 use Psr\SimpleCache\CacheInterface;
+use Symfony\Component\Uid\Exception\InvalidArgumentException;
 use Symfony\Component\Uid\Uuid;
 
 /**
@@ -105,7 +106,7 @@ class Psr16StoreSession implements SessionStoreInterface
                     if ($this->exists($uuid)) {
                         $validSessionIds[] = $uuid;
                     }
-                } catch (\Throwable) {
+                } catch (InvalidArgumentException $e) {
                     // Skip invalid UUIDs
                 }
             }

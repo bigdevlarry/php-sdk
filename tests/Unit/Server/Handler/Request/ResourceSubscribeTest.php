@@ -21,7 +21,9 @@ use Mcp\Schema\Request\ResourceSubscribeRequest;
 use Mcp\Schema\Resource;
 use Mcp\Schema\Result\EmptyResult;
 use Mcp\Server\Handler\Request\ResourceSubscribeHandler;
+use Mcp\Server\Resource\ResourceSubscriptionInterface;
 use Mcp\Server\Session\SessionInterface;
+use PHPUnit\Framework\Attributes\TestDox;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
@@ -30,16 +32,18 @@ class ResourceSubscribeTest extends TestCase
     private ResourceSubscribeHandler $handler;
     private RegistryInterface&MockObject $registry;
     private SessionInterface&MockObject $session;
+    private ResourceSubscriptionInterface&MockObject $resourceSubscription;
 
     protected function setUp(): void
     {
         $this->registry = $this->createMock(RegistryInterface::class);
+        $this->resourceSubscription = $this->createMock(ResourceSubscriptionInterface::class);
         $this->session = $this->createMock(SessionInterface::class);
-
-        $this->handler = new ResourceSubscribeHandler($this->registry);
+        $this->handler = new ResourceSubscribeHandler($this->registry, $this->resourceSubscription);
     }
 
-    public function testHandleSuccessfulSubscribe(): void
+    #[TestDox('Client can successfully subscribe to a resource')]
+    public function testClientCanSuccessfulSubscribeToAResource(): void
     {
         $uri = 'file://documents/readme.txt';
         $request = $this->createResourceSubscribeRequest($uri);
@@ -53,7 +57,7 @@ class ResourceSubscribeTest extends TestCase
             ->with($uri)
             ->willReturn($resourceReference);
 
-        $this->registry->expects($this->once())
+        $this->resourceSubscription->expects($this->once())
             ->method('subscribe')
             ->with($this->session, $uri);
 
@@ -64,7 +68,8 @@ class ResourceSubscribeTest extends TestCase
         $this->assertInstanceOf(EmptyResult::class, $response->result);
     }
 
-    public function testDuplicateSubscribeDoesNotError(): void
+    #[TestDox('Gracefully handle duplicate subscription to a resource')]
+    public function testDuplicateSubscriptionIsGracefullyHandled(): void
     {
         $uri = 'file://documents/readme.txt';
         $request = $this->createResourceSubscribeRequest($uri);
@@ -78,7 +83,7 @@ class ResourceSubscribeTest extends TestCase
             ->with($uri)
             ->willReturn($resourceReference);
 
-        $this->registry
+        $this->resourceSubscription
             ->expects($this->exactly(2))
             ->method('subscribe')
             ->with($this->session, $uri);
@@ -95,6 +100,7 @@ class ResourceSubscribeTest extends TestCase
         $this->assertInstanceOf(EmptyResult::class, $response2->result);
     }
 
+    #[TestDox('Subscription to a resource with an empty uri throws InvalidArgumentException')]
     public function testSubscribeWithEmptyUriThrowsError(): void
     {
         $this->expectException(InvalidArgumentException::class);
@@ -103,6 +109,7 @@ class ResourceSubscribeTest extends TestCase
         $this->createResourceSubscribeRequest('');
     }
 
+    #[TestDox('Subscription to a resource with an invalid uri throws ResourceNotException')]
     public function testHandleSubscribeResourceNotFoundException(): void
     {
         $uri = 'file://missing/file.txt';

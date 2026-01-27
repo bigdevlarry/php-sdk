@@ -21,7 +21,9 @@ use Mcp\Schema\Request\ResourceUnsubscribeRequest;
 use Mcp\Schema\Resource;
 use Mcp\Schema\Result\EmptyResult;
 use Mcp\Server\Handler\Request\ResourceUnsubscribeHandler;
+use Mcp\Server\Resource\ResourceSubscriptionInterface;
 use Mcp\Server\Session\SessionInterface;
+use PHPUnit\Framework\Attributes\TestDox;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
@@ -30,16 +32,19 @@ class ResourceUnsubscribeTest extends TestCase
     private ResourceUnsubscribeHandler $handler;
     private RegistryInterface&MockObject $registry;
     private SessionInterface&MockObject $session;
+    private ResourceSubscriptionInterface&MockObject $resourceSubscription;
 
     protected function setUp(): void
     {
         $this->registry = $this->createMock(RegistryInterface::class);
+        $this->resourceSubscription = $this->createMock(ResourceSubscriptionInterface::class);
         $this->session = $this->createMock(SessionInterface::class);
 
-        $this->handler = new ResourceUnsubscribeHandler($this->registry);
+        $this->handler = new ResourceUnsubscribeHandler($this->registry, $this->resourceSubscription);
     }
 
-    public function testHandleSuccessfulUnsubscribe(): void
+    #[TestDox('Client can unsubscribe from a resource')]
+    public function testClientCanUnsubscribeFromAResource(): void
     {
         // Arrange
         $uri = 'file://documents/readme.txt';
@@ -54,7 +59,7 @@ class ResourceUnsubscribeTest extends TestCase
             ->with($uri)
             ->willReturn($resourceReference);
 
-        $this->registry->expects($this->once())
+        $this->resourceSubscription->expects($this->once())
             ->method('unsubscribe')
             ->with($this->session, $uri);
 
@@ -67,7 +72,8 @@ class ResourceUnsubscribeTest extends TestCase
         $this->assertInstanceOf(EmptyResult::class, $response->result);
     }
 
-    public function testDuplicateUnsubscribeDoesNotError(): void
+    #[TestDox('Gracefully handle duplicate unsubscription from a resource')]
+    public function testDuplicateUnSubscriptionIsGracefullyHandled(): void
     {
         // Arrange
         $uri = 'file://documents/readme.txt';
@@ -82,7 +88,7 @@ class ResourceUnsubscribeTest extends TestCase
             ->with($uri)
             ->willReturn($resourceReference);
 
-        $this->registry
+        $this->resourceSubscription
             ->expects($this->exactly(2))
             ->method('unsubscribe')
             ->with($this->session, $uri);
@@ -100,6 +106,7 @@ class ResourceUnsubscribeTest extends TestCase
         $this->assertInstanceOf(EmptyResult::class, $response2->result);
     }
 
+    #[TestDox('Unsubscription from a resource with an invalid uri throws ResourceNotException')]
     public function testHandleUnsubscribeResourceNotFoundException(): void
     {
         $uri = 'file://missing/file.txt';
@@ -119,6 +126,7 @@ class ResourceUnsubscribeTest extends TestCase
         $this->assertEquals(\sprintf('Resource not found for uri: "%s".', $uri), $response->message);
     }
 
+    #[TestDox('Unsubscription from a resource with an empty uri throws InvalidArgumentException')]
     public function testUnsubscribeWithEmptyUriThrowsError(): void
     {
         $this->expectException(InvalidArgumentException::class);

@@ -15,6 +15,7 @@ namespace Mcp\Server\Session;
 
 use Mcp\Server\NativeClock;
 use Psr\Clock\ClockInterface;
+use Symfony\Component\Uid\Exception\InvalidArgumentException;
 use Symfony\Component\Uid\Uuid;
 
 /**
@@ -139,7 +140,7 @@ class FileSessionStore implements SessionStoreInterface
                 @unlink($path);
                 try {
                     $deleted[] = Uuid::fromString($entry);
-                } catch (\Throwable) {
+                } catch (InvalidArgumentException $e) {
                     // ignore non-UUID file names
                 }
             }
@@ -152,16 +153,14 @@ class FileSessionStore implements SessionStoreInterface
 
     public function getAllSessionIds(): array
     {
-        $sessionIds = [];
-        $now = $this->clock->now()->getTimestamp();
-
         $dir = @opendir($this->directory);
         if (false === $dir) {
-            return $sessionIds;
+            return [];
         }
 
+        $sessionIds = [];
+        $now = $this->clock->now()->getTimestamp();
         while (($entry = readdir($dir)) !== false) {
-            // Skip dot entries
             if ('.' === $entry || '..' === $entry) {
                 continue;
             }
@@ -178,8 +177,8 @@ class FileSessionStore implements SessionStoreInterface
 
             try {
                 $sessionIds[] = Uuid::fromString($entry);
-            } catch (\Throwable) {
-                // ignore non-UUID file names
+            } catch (InvalidArgumentException $e) {
+                // ignore non-UUID sessions
             }
         }
 

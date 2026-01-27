@@ -18,9 +18,11 @@ use Mcp\Schema\JsonRpc\Request;
 use Mcp\Schema\JsonRpc\Response;
 use Mcp\Schema\Request\ResourceSubscribeRequest;
 use Mcp\Schema\Result\EmptyResult;
+use Mcp\Server\Resource\ResourceSubscriptionInterface;
 use Mcp\Server\Session\SessionInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Psr\SimpleCache\InvalidArgumentException;
 
 /**
  * @implements RequestHandlerInterface<EmptyResult>
@@ -31,6 +33,7 @@ final class ResourceSubscribeHandler implements RequestHandlerInterface
 {
     public function __construct(
         private readonly RegistryInterface $registry,
+        private readonly ResourceSubscriptionInterface $resourceSubscription,
         private readonly LoggerInterface $logger = new NullLogger(),
     ) {
     }
@@ -40,6 +43,9 @@ final class ResourceSubscribeHandler implements RequestHandlerInterface
         return $request instanceof ResourceSubscribeRequest;
     }
 
+    /**
+     * @throws InvalidArgumentException
+     */
     public function handle(Request $request, SessionInterface $session): Response|Error
     {
         \assert($request instanceof ResourceSubscribeRequest);
@@ -56,7 +62,7 @@ final class ResourceSubscribeHandler implements RequestHandlerInterface
 
         $this->logger->debug('Subscribing to resource', ['uri' => $uri]);
 
-        $this->registry->subscribe($session, $uri);
+        $this->resourceSubscription->subscribe($session, $uri);
 
         return new Response(
             $request->getId(),

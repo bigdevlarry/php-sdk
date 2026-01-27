@@ -25,8 +25,6 @@ use Mcp\Schema\Prompt;
 use Mcp\Schema\Resource;
 use Mcp\Schema\ResourceTemplate;
 use Mcp\Schema\Tool;
-use Mcp\Server\Protocol;
-use Mcp\Server\Session\SessionInterface;
 
 /**
  * @phpstan-import-type Handler from ElementReference
@@ -159,20 +157,4 @@ interface RegistryInterface
      * @throws PromptNotFoundException
      */
     public function getPrompt(string $name): PromptReference;
-
-    /**
-     * Subscribes a session to a specific resource URI.
-     */
-    public function subscribe(SessionInterface $session, string $uri): void;
-
-    /**
-     * Unsubscribes a session from a specific resource URI.
-     */
-    public function unsubscribe(SessionInterface $session, string $uri): void;
-
-    /**
-     * Notifies all sessions subscribed to the given resource URI that the
-     * resource has changed. Sends a ResourceUpdatedNotification for each subscriber.
-     */
-    public function notifyResourceChanged(Protocol $protocol, string $uri): void;
 }
