@@ -499,15 +499,11 @@ final class Builder
     {
         $logger = $this->logger ?? new NullLogger();
         $container = $this->container ?? new Container();
+        $registry = $this->registry ?? new Registry($this->eventDispatcher, $logger);
 
         $sessionTtl = $this->sessionTtl ?? 3600;
         $sessionFactory = $this->sessionFactory ?? new SessionFactory();
         $sessionStore = $this->sessionStore ?? new InMemorySessionStore($sessionTtl);
-
-        $registry = $this->registry ?? new Registry(
-            $this->eventDispatcher,
-            $logger,
-        );
 
         $resourceSubscription = $this->resourceSubscription ?? new ResourceSubscription(
             $logger,
