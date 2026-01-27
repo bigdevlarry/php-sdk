@@ -40,7 +40,7 @@ interface ResourceSubscriptionInterface
      * Notifies all sessions subscribed to the given resource URI that the
      * resource has changed. Sends a ResourceUpdatedNotification for each subscriber.
      *
-     * @throws \InvalidArgumentException
+     * @throws InvalidArgumentException
      */
     public function notifyResourceChanged(Protocol $protocol, string $uri): void;
 }
